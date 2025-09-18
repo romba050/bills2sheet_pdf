@@ -1,0 +1,40 @@
+# Google API credentials - DO NOT COMMIT
+credentials.json
+token.json
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+env/
+venv/
+.env
+
+# Temporary files
+*.tmp
+*.log
+app.sh
+
+# Local Python version (pyenv/asdf)
+.python-version
+
+# Claude
+.claude
+
+# Brainstorming ideas
+my_README.md
+
+# Debugging, testing material
+debugging
+
+# day-2-day bills
+bills

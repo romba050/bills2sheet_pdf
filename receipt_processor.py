@@ -197,26 +197,49 @@ class ReceiptProcessor:
                 # Try to parse item lines - they typically have name + number + prices
                 # Pattern: Item Name + Article Number + Unit Price + Quantity + Total Price
                 parts = re.split(r'\s+', line)
-                if len(parts) >= 4:
-                    # Find the pattern: text + long_number + price + quantity + price
-                    item_name = []
-                    article_num = None
-                    prices = []
-
-                    for i, part in enumerate(parts):
-                        if re.match(r'^\d{4,}$', part):  # Article number (4+ digits)
-                            article_num = part
-                            item_name = ' '.join(parts[:i])
-                            remaining = parts[i+1:]
-                            # Extract prices from remaining parts
-                            for p in remaining:
-                                if re.match(r'^\d+[,\.]\d{2}$', p):
-                                    prices.append(p.replace(',', '.'))
+                if len(parts) >= 2:
+                    # Check for reduction/discount lines (negative amounts)
+                    negative_price = None
+                    for part in parts:
+                        if re.match(r'^-\d+[,\.]\d{2}$', part):  # Negative price
+                            negative_price = part.replace(',', '.')
                             break
 
-                    if item_name and len(prices) >= 2:
-                        # Format: [item_name, article_num, unit_price, quantity, total_price]
-                        table_rows.append([item_name, article_num, prices[0], '1.00 st', prices[-1]])
+                    if negative_price:
+                        # This is a reduction line - extract everything before the price as item name
+                        item_parts = []
+                        for part in parts:
+                            if part == parts[-1] and re.match(r'^-\d+[,\.]\d{2}$', part):
+                                break
+                            item_parts.append(part)
+
+                        if item_parts:
+                            item_name = ' '.join(item_parts)
+                            # Format: [item_name, no_article_num, unit_price, quantity, total_price]
+                            table_rows.append([item_name, '', negative_price, '1.00 st', negative_price])
+                            continue
+
+                    # Standard item processing with article numbers
+                    if len(parts) >= 4:
+                        # Find the pattern: text + long_number + price + quantity + price
+                        item_name = []
+                        article_num = None
+                        prices = []
+
+                        for i, part in enumerate(parts):
+                            if re.match(r'^\d{4,}$', part):  # Article number (4+ digits)
+                                article_num = part
+                                item_name = ' '.join(parts[:i])
+                                remaining = parts[i+1:]
+                                # Extract prices from remaining parts
+                                for p in remaining:
+                                    if re.match(r'^\d+[,\.]\d{2}$', p):
+                                        prices.append(p.replace(',', '.'))
+                                break
+
+                        if item_name and len(prices) >= 2:
+                            # Format: [item_name, article_num, unit_price, quantity, total_price]
+                            table_rows.append([item_name, article_num, prices[0], '1.00 st', prices[-1]])
 
         return table_rows if len(table_rows) > 1 else []
 
@@ -256,8 +279,8 @@ class ReceiptProcessor:
             price_clean = re.sub(r'[^\d,.-]', '', price_value)
             price_clean = price_clean.replace(',', '.')
 
-            # Validate price format
-            if re.match(r'^\d+\.\d{2}$', price_clean):
+            # Validate price format (allow negative prices for reductions)
+            if re.match(r'^-?\d+\.\d{2}$', price_clean):
                 # Escape items starting with '+' or '*'
                 if item_name.startswith(('+', '*')):
                     item_name = "'" + item_name

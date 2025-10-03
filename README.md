@@ -150,7 +150,7 @@ bills2sheet_pdf/
 **Google Sheets Authentication Errors**
 - Verify `credentials.json` is in the project directory
 - Check that Google Sheets API is enabled in your Google Cloud project
-- Delete `token.json` and re-authenticate if needed
+- Delete `token.json`, run the app again -  a brwoser window asking you to authenticate again should open
 
 **Import/Module Errors**
 - Ensure all dependencies are installed: `uv sync`

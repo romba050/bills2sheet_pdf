@@ -28,6 +28,7 @@ from typing import List, Tuple
 import json
 import csv
 import pdfplumber
+from abc import ABC, abstractmethod
 
 try:
     from googleapiclient.discovery import build
@@ -46,76 +47,48 @@ except ImportError:
 # Google Sheets API scope
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-class ReceiptProcessor:
-    def __init__(self, credentials_file: str = 'credentials.json', token_file: str = 'token.json'):
-        """Initialize the receipt processor with Google Sheets API credentials."""
-        self.credentials_file = credentials_file
-        self.token_file = token_file
-        self.service = None
-        
-    def authenticate_google_sheets(self) -> None:
-        """Authenticate with Google Sheets API."""
-        creds = None
-        
-        # Load existing token if available
-        if Path(self.token_file).exists():
-            creds = Credentials.from_authorized_user_file(self.token_file, SCOPES)
-        
-        # If no valid credentials, get new ones
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                if not Path(self.credentials_file).exists():
-                    print(f"Error: {self.credentials_file} not found.")
-                    print("Download it from Google Cloud Console and place it in the script directory.")
-                    sys.exit(1)
-                
-                flow = InstalledAppFlow.from_client_secrets_file(self.credentials_file, SCOPES)
-                creds = flow.run_local_server(port=0)
-            
-            # Save credentials for next run
-            with open(self.token_file, 'w') as token:
-                token.write(creds.to_json())
-        
-        self.service = build('sheets', 'v4', credentials=creds)
-    
-    def extract_table_from_pdf(self, pdf_path: str) -> List[List[str]]:
-        """Extract table data from PDF using pdfplumber."""
-        if not Path(pdf_path).exists():
-            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                all_tables = []
+class StoreParser(ABC):
+    """Abstract base class for store-specific receipt parsers."""
 
-                for page in pdf.pages:
-                    # Try to extract tables
-                    tables = page.extract_tables()
-                    if tables:
-                        all_tables.extend(tables)
+    @abstractmethod
+    def parse_items(self, pdf_path: str) -> List[Tuple[str, str]]:
+        """Extract items and their prices from the PDF.
 
-                    # If no tables found, try to extract text and parse it
-                    if not tables:
-                        text = page.extract_text()
-                        if text:
-                            # Parse text for receipt structure
-                            parsed_table = self.parse_receipt_text(text)
-                            if parsed_table:
-                                all_tables.append(parsed_table)
+        Returns:
+            List of tuples (item_name, price)
+        """
+        pass
 
-                if not all_tables:
-                    raise ValueError(f"No tables found in PDF: {pdf_path}")
+    @abstractmethod
+    def extract_total(self, pdf_path: str) -> str:
+        """Extract the total amount paid from the PDF.
 
-                # Return the largest table (likely the main receipt table)
-                return max(all_tables, key=len)
+        Returns:
+            Total amount as string (e.g., "123.45")
+        """
+        pass
 
-        except Exception as e:
-            print(f"Error extracting table from PDF: {e}")
-            sys.exit(1)
+    @abstractmethod
+    def extract_date(self, pdf_path: str) -> str:
+        """Extract the date from the PDF.
 
-    def extract_betalat_total(self, pdf_path: str) -> str:
-        """Extract the 'Betalat' (paid) total from the PDF."""
+        Returns:
+            Date in YYYY-MM-DD format
+        """
+        pass
+
+
+class ICAParser(StoreParser):
+    """Parser for ICA receipts."""
+
+    def parse_items(self, pdf_path: str) -> List[Tuple[str, str]]:
+        """Extract items and their prices from ICA PDF."""
+        table = self._extract_table_from_pdf(pdf_path)
+        return self._process_receipt_table(table)
+
+    def extract_total(self, pdf_path: str) -> str:
+        """Extract the 'Betalat' (paid) total from ICA PDF."""
         if not Path(pdf_path).exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
@@ -144,8 +117,8 @@ class ReceiptProcessor:
             print(f"Error extracting Betalat total from PDF: {e}")
             return ""
 
-    def extract_date_from_pdf(self, pdf_path: str) -> str:
-        """Extract the date from the PDF (format: YYYY-MM-DD)."""
+    def extract_date(self, pdf_path: str) -> str:
+        """Extract the date from ICA PDF (format: YYYY-MM-DD)."""
         if not Path(pdf_path).exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
@@ -171,7 +144,41 @@ class ReceiptProcessor:
             print(f"Error extracting date from PDF: {e}")
             return ""
 
-    def parse_receipt_text(self, text: str) -> List[List[str]]:
+    def _extract_table_from_pdf(self, pdf_path: str) -> List[List[str]]:
+        """Extract table data from PDF using pdfplumber."""
+        if not Path(pdf_path).exists():
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                all_tables = []
+
+                for page in pdf.pages:
+                    # Try to extract tables
+                    tables = page.extract_tables()
+                    if tables:
+                        all_tables.extend(tables)
+
+                    # If no tables found, try to extract text and parse it
+                    if not tables:
+                        text = page.extract_text()
+                        if text:
+                            # Parse text for receipt structure
+                            parsed_table = self._parse_receipt_text(text)
+                            if parsed_table:
+                                all_tables.append(parsed_table)
+
+                if not all_tables:
+                    raise ValueError(f"No tables found in PDF: {pdf_path}")
+
+                # Return the largest table (likely the main receipt table)
+                return max(all_tables, key=len)
+
+        except Exception as e:
+            print(f"Error extracting table from PDF: {e}")
+            sys.exit(1)
+
+    def _parse_receipt_text(self, text: str) -> List[List[str]]:
         """Parse receipt text to extract structured data."""
         lines = [line.strip() for line in text.split('\n') if line.strip()]
 
@@ -243,7 +250,7 @@ class ReceiptProcessor:
 
         return table_rows if len(table_rows) > 1 else []
 
-    def process_receipt_table(self, table: List[List[str]]) -> List[Tuple[str, str]]:
+    def _process_receipt_table(self, table: List[List[str]]) -> List[Tuple[str, str]]:
         """Process the extracted table to get item-price pairs."""
         items_and_prices = []
 
@@ -281,18 +288,274 @@ class ReceiptProcessor:
 
             # Validate price format (allow negative prices for reductions)
             if re.match(r'^-?\d+\.\d{2}$', price_clean):
-                # Escape items starting with '+' or '*'
-                if item_name.startswith(('+', '*')):
-                    item_name = "'" + item_name
-
                 items_and_prices.append((item_name, price_clean))
 
         return items_and_prices
 
-    def extract_items_and_prices(self, pdf_path: str) -> List[Tuple[str, str]]:
-        """Extract items and their prices from the PDF."""
-        table = self.extract_table_from_pdf(pdf_path)
-        return self.process_receipt_table(table)
+
+class WillysParser(StoreParser):
+    """Parser for Willy's receipts."""
+
+    def parse_items(self, pdf_path: str) -> List[Tuple[str, str]]:
+        """Extract items and their prices from Willy's PDF."""
+        if not Path(pdf_path).exists():
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+        items_and_prices = []
+
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        lines = [line.strip() for line in text.split('\n') if line.strip()]
+
+                        in_items_section = False
+                        i = 0
+                        pending_item_name = None
+
+                        while i < len(lines):
+                            line = lines[i]
+
+                            # Start of items section
+                            if 'Start Självscanning' in line or 'Start självscanning' in line:
+                                in_items_section = True
+                                i += 1
+                                continue
+
+                            # End of items section
+                            if 'Slut Självscanning' in line or 'Slut självscanning' in line:
+                                in_items_section = False
+                                break
+
+                            if not in_items_section:
+                                i += 1
+                                continue
+
+                            # Check if this is a weight calculation line (for multi-line items)
+                            # Format: "0,140kg*499,00kr/kg 69,86"
+                            if pending_item_name and re.match(r'^\d+[,\.]\d+kg\*', line):
+                                # Extract price from the end of the calculation line
+                                parts = line.split()
+                                if parts and re.match(r'^\d+[,\.]\d{2}$', parts[-1]):
+                                    price = parts[-1].replace(',', '.')
+                                    items_and_prices.append((pending_item_name, price))
+                                    pending_item_name = None
+                                    i += 1
+                                    continue
+
+                            # Parse item lines
+                            item_price = self._parse_willys_line(line)
+                            if item_price:
+                                items_and_prices.append(item_price)
+                                pending_item_name = None
+                            else:
+                                # This might be a multi-line item (name only, price on next line)
+                                # Check if the line looks like an item name (no price at the end)
+                                if not re.search(r'\d+[,\.]\d{2}$', line):
+                                    # Save it as a potential item name
+                                    pending_item_name = line.strip()
+
+                            i += 1
+
+        except Exception as e:
+            print(f"Error extracting items from Willy's PDF: {e}")
+            sys.exit(1)
+
+        return items_and_prices
+
+    def _parse_willys_line(self, line: str) -> Tuple[str, str] | None:
+        """Parse a single line from Willy's receipt."""
+        # Skip empty lines
+        if not line:
+            return None
+
+        # Handle discount/rabatt lines (indented with "Rabatt:" or "Prisnedsättning")
+        if line.strip().startswith('Rabatt:') or line.strip().startswith('Prisnedsättning'):
+            # Extract item name and negative price
+            # Format: "Rabatt:ITEMNAME -XX,XX" or "Prisnedsättning XX,X% -XX,XX"
+            parts = line.split()
+
+            # Find the negative price (last element that matches pattern)
+            price = None
+            for part in reversed(parts):
+                if re.match(r'^-\d+[,\.]\d{2}$', part):
+                    price = part.replace(',', '.')
+                    break
+
+            if price:
+                # Extract item name (everything between "Rabatt:" and the price)
+                if 'Rabatt:' in line:
+                    item_start = line.find('Rabatt:') + len('Rabatt:')
+                    item_end = line.rfind(price)
+                    item_name = line[item_start:item_end].strip()
+                elif 'Prisnedsättning' in line:
+                    # For price reductions, find the item name before the percentage
+                    item_start = line.find('Prisnedsättning')
+                    item_end = line.rfind(price)
+                    # Extract everything after "Prisnedsättning XX,X%"
+                    # Actually, for Prisnedsättning, there's no item name - just the reduction
+                    item_name = line[:item_start].strip()
+                    if not item_name:
+                        item_name = "Prisnedsättning"
+
+                return (item_name, price)
+
+            return None
+
+        # Handle pant (deposit) lines
+        if line.strip().startswith('+PANT'):
+            # Format: "+PANT ALUMINIUMBURK 1KR 10,00" or "+PANT ENG PET >1L 2,00"
+            parts = line.split()
+            # Price is the last element
+            if parts:
+                price_str = parts[-1]
+                if re.match(r'^\d+[,\.]\d{2}$', price_str):
+                    price = price_str.replace(',', '.')
+                    # Item name is everything except the last element
+                    item_name = ' '.join(parts[:-1])
+                    return (item_name, price)
+            return None
+
+        # Regular item lines
+        # Try to find a price at the end of the line
+        parts = line.split()
+        if not parts:
+            return None
+
+        # Look for price pattern at the end
+        price = None
+        price_idx = -1
+
+        # Check if last element is a price
+        if re.match(r'^\d+[,\.]\d{2}$', parts[-1]):
+            price = parts[-1].replace(',', '.')
+            price_idx = len(parts) - 1
+        else:
+            # Sometimes there's calculation info before the price
+            # Format: "ITEM 4st*11,90 47,60" or "ITEM 0,140kg*499,00kr/kg 69,86"
+            for i in range(len(parts) - 1, -1, -1):
+                if re.match(r'^\d+[,\.]\d{2}$', parts[i]):
+                    price = parts[i].replace(',', '.')
+                    price_idx = i
+                    break
+
+        if price and price_idx > 0:
+            # Item name is everything before the price and calculation info
+            # Look for the start of calculation info (contains '*', 'kg', numbers with 'kg')
+            item_end_idx = price_idx
+            for i in range(price_idx - 1, -1, -1):
+                part = parts[i]
+                # Check if this looks like calculation info
+                if ('*' in part or
+                    part.endswith('kg') or
+                    part.endswith('kg*') or
+                    'kr/' in part or
+                    re.match(r'^\d+[,\.]?\d*kg', part) or  # matches "0,140kg" or "0.140kg"
+                    re.match(r'^\d+st\*', part)):
+                    item_end_idx = i
+                else:
+                    # If not calculation, this is still part of the item name
+                    break
+
+            # Extract item name from start to where calculation begins
+            item_parts = parts[:item_end_idx]
+
+            if item_parts:
+                item_name = ' '.join(item_parts)
+                return (item_name, price)
+
+        return None
+
+    def extract_total(self, pdf_path: str) -> str:
+        """Extract the 'Totalt' (total) amount from Willy's PDF."""
+        if not Path(pdf_path).exists():
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        lines = [line.strip() for line in text.split('\n') if line.strip()]
+
+                        for line in lines:
+                            # Look for "Totalt" followed by amount and SEK
+                            # Format: "Totalt 1043,88 SEK"
+                            if line.startswith('Totalt ') and 'SEK' in line:
+                                # Extract the amount between "Totalt " and " SEK"
+                                amount_str = line.replace('Totalt ', '').replace(' SEK', '').strip()
+                                # Convert comma to dot for decimal
+                                amount_clean = amount_str.replace(',', '.')
+                                # Validate it's a proper decimal number
+                                if re.match(r'^\d+\.\d{2}$', amount_clean):
+                                    return amount_clean
+
+                # If not found, return empty string
+                return ""
+
+        except Exception as e:
+            print(f"Error extracting Totalt from Willy's PDF: {e}")
+            return ""
+
+    def extract_date(self, pdf_path: str) -> str:
+        """Extract the date from Willy's PDF (format: YYYY-MM-DD)."""
+        if not Path(pdf_path).exists():
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        # Look for date in format YYYY-MM-DD HH:MM
+                        date_match = re.search(r'(\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}', text)
+                        if date_match:
+                            return date_match.group(1)
+
+                # If not found, return empty string
+                return ""
+
+        except Exception as e:
+            print(f"Error extracting date from Willy's PDF: {e}")
+            return ""
+
+
+class ReceiptProcessor:
+    def __init__(self, store_parser: StoreParser, store_name: str, credentials_file: str = 'credentials.json', token_file: str = 'token.json'):
+        """Initialize the receipt processor with Google Sheets API credentials."""
+        self.store_parser = store_parser
+        self.store_name = store_name
+        self.credentials_file = credentials_file
+        self.token_file = token_file
+        self.service = None
+        
+    def authenticate_google_sheets(self) -> None:
+        """Authenticate with Google Sheets API."""
+        creds = None
+        
+        # Load existing token if available
+        if Path(self.token_file).exists():
+            creds = Credentials.from_authorized_user_file(self.token_file, SCOPES)
+        
+        # If no valid credentials, get new ones
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                if not Path(self.credentials_file).exists():
+                    print(f"Error: {self.credentials_file} not found.")
+                    print("Download it from Google Cloud Console and place it in the script directory.")
+                    sys.exit(1)
+                
+                flow = InstalledAppFlow.from_client_secrets_file(self.credentials_file, SCOPES)
+                creds = flow.run_local_server(port=0)
+            
+            # Save credentials for next run
+            with open(self.token_file, 'w') as token:
+                token.write(creds.to_json())
+        
+        self.service = build('sheets', 'v4', credentials=creds)
     
     def create_or_update_sheet(self, spreadsheet_id: str, sheet_name: str, data: List[Tuple[str, str]], pdf_path: str) -> None:
         """Create or update a Google Sheet with the extracted data."""
@@ -300,25 +563,27 @@ class ReceiptProcessor:
             raise RuntimeError("Google Sheets service not initialized. Call authenticate_google_sheets() first.")
 
         # Extract PDF total
-        pdf_total = self.extract_betalat_total(pdf_path)
+        pdf_total = self.store_parser.extract_total(pdf_path)
 
         # Prepare data for Google Sheets (add headers with expense tracking columns)
         sheet_data = [['Item', 'Shared expenses', 'My expenses', 'Jessica expenses', '', '', '']]
 
-        # Convert data to expanded format (starting from row 2)
-        for item, price in data:
-            sheet_data.append([item, price, '', '', '', '', ''])
+        # Add summary rows before the data with labels in column F and formulas in column G
+        sheet_data.append(['', '', '', '', '', 'Sum of shared expenses', f'=SUM(B:B)'])
+        sheet_data.append(['', '', '', '', '', 'Sum of my expenses', f'=SUM(C:C)'])
+        sheet_data.append(['', '', '', '', '', "Sum of Jessica's expenses", f'=SUM(D:D)'])
+        sheet_data.append(['', '', '', '', '', 'Sheet total', '=SUM(G2:G4)'])
+        sheet_data.append(['', '', '', '', '', 'PDF total', pdf_total])
 
         # Add empty row for separation
         sheet_data.append(['', '', '', '', '', '', ''])
 
-        # Add summary rows after the data with labels in column F and formulas in column G
-        start_row = len(data) + 3  # +1 for header, +1 for empty row, +1 for 1-based indexing
-        sheet_data.append(['', '', '', '', '', 'Sum of shared expenses', '=SUM(B:B)'])
-        sheet_data.append(['', '', '', '', '', 'Sum of my expenses', '=SUM(C:C)'])
-        sheet_data.append(['', '', '', '', '', "Sum of Jessica's expenses", '=SUM(D:D)'])
-        sheet_data.append(['', '', '', '', '', 'Sheet total', f'=SUM(G{start_row}:G{start_row+2})'])
-        sheet_data.append(['', '', '', '', '', 'PDF total', pdf_total])
+        # Convert data to expanded format
+        for item, price in data:
+            # Remove leading special characters that might cause issues in Google Sheets
+            # Strip quotes first (from old escaping logic), then strip problematic characters
+            clean_item = item.lstrip("'").lstrip('+*=@-')
+            sheet_data.append([clean_item, price, '', '', '', '', ''])
         
         try:
             # Check if sheet exists, create if it doesn't
@@ -368,25 +633,29 @@ class ReceiptProcessor:
             raise RuntimeError("Google Sheets service not initialized. Call authenticate_google_sheets() first.")
 
         # Extract PDF total
-        pdf_total = self.extract_betalat_total(pdf_path)
+        pdf_total = self.store_parser.extract_total(pdf_path)
 
         # Prepare data for Google Sheets (add headers with expense tracking columns)
         sheet_data = [['Item', 'Shared expenses', 'My expenses', 'Jessica expenses', '', '', '']]
 
-        # Convert data to expanded format (starting from row 2)
-        for item, price in data:
-            sheet_data.append([item, price, '', '', '', '', ''])
+        # Add summary rows before the data with labels in column F and formulas in column G
+        data_start_row = 7  # Row where actual item data will start (1-based)
+        data_end_row = data_start_row + len(data) - 1
+        sheet_data.append(['', '', '', '', '', 'Sum of shared expenses', f'=SUM(B{data_start_row}:B{data_end_row})'])
+        sheet_data.append(['', '', '', '', '', 'Sum of my expenses', f'=SUM(C{data_start_row}:C{data_end_row})'])
+        sheet_data.append(['', '', '', '', '', "Sum of Jessica's expenses", f'=SUM(D{data_start_row}:D{data_end_row})'])
+        sheet_data.append(['', '', '', '', '', 'Sheet total', '=SUM(G2:G4)'])
+        sheet_data.append(['', '', '', '', '', 'PDF total', pdf_total])
 
         # Add empty row for separation
         sheet_data.append(['', '', '', '', '', '', ''])
 
-        # Add summary rows after the data with labels in column F and formulas in column G
-        start_row = len(data) + 3  # +1 for header, +1 for empty row, +1 for 1-based indexing
-        sheet_data.append(['', '', '', '', '', 'Sum of shared expenses', '=SUM(B:B)'])
-        sheet_data.append(['', '', '', '', '', 'Sum of my expenses', '=SUM(C:C)'])
-        sheet_data.append(['', '', '', '', '', "Sum of Jessica's expenses", '=SUM(D:D)'])
-        sheet_data.append(['', '', '', '', '', 'Sheet total', f'=SUM(G{start_row}:G{start_row+2})'])
-        sheet_data.append(['', '', '', '', '', 'PDF total', pdf_total])
+        # Convert data to expanded format
+        for item, price in data:
+            # Remove leading special characters that might cause issues in Google Sheets
+            # Strip quotes first (from old escaping logic), then strip problematic characters
+            clean_item = item.lstrip("'").lstrip('+*=@-')
+            sheet_data.append([clean_item, price, '', '', '', '', ''])
         
         try:
             # Create new spreadsheet
@@ -442,9 +711,9 @@ class ReceiptProcessor:
         """Process a receipt PDF end-to-end."""
         print(f"Processing receipt: {pdf_path}")
 
-        # Extract table from PDF
-        print("Extracting table from PDF...")
-        items_and_prices = self.extract_items_and_prices(pdf_path)
+        # Extract items from PDF
+        print("Extracting items from PDF...")
+        items_and_prices = self.store_parser.parse_items(pdf_path)
         
         if not items_and_prices:
             print("No items found in the receipt.")
@@ -476,9 +745,9 @@ class ReceiptProcessor:
                 # Use PDF date as sheet name if default name was used
                 final_sheet_name = sheet_name
                 if sheet_name == "Receipt Items":
-                    pdf_date = self.extract_date_from_pdf(pdf_path)
+                    pdf_date = self.store_parser.extract_date(pdf_path)
                     if pdf_date:
-                        final_sheet_name = pdf_date
+                        final_sheet_name = f"{pdf_date}-{self.store_name}"
                         print(f"Using PDF date as sheet name: {final_sheet_name}")
 
                 self.create_or_update_sheet(spreadsheet_id, final_sheet_name, items_and_prices, pdf_path)
@@ -487,22 +756,32 @@ class ReceiptProcessor:
 def main():
     parser = argparse.ArgumentParser(description='Process receipt PDFs with table extraction and upload to Google Sheets')
     parser.add_argument('pdf_path', help='Path to the receipt PDF file')
+    parser.add_argument('--store', required=True, choices=['ICA', 'WILLYS'], help='Store type (ICA or WILLYS)')
     parser.add_argument('--spreadsheet-id', help='Google Sheets spreadsheet ID (required unless --create-new)')
     parser.add_argument('--sheet-name', default='Receipt Items', help='Name of the sheet to update (default: Receipt Items)')
     parser.add_argument('--create-new', action='store_true', help='Create a new spreadsheet instead of updating existing one')
     parser.add_argument('--credentials', default='credentials.json', help='Path to Google API credentials file')
     parser.add_argument('--token', default='token.json', help='Path to token file for storing authentication')
     parser.add_argument('--to-csv', help='Save extracted data to CSV file instead of Google Sheets')
-    
+
     args = parser.parse_args()
-    
+
     if not args.to_csv and not args.create_new and not args.spreadsheet_id:
         print("Error: Either --to-csv, --spreadsheet-id, or --create-new must be provided.")
         sys.exit(1)
-    
+
+    # Create the appropriate store parser
+    if args.store == 'ICA':
+        store_parser = ICAParser()
+    elif args.store == 'WILLYS':
+        store_parser = WillysParser()
+    else:
+        print(f"Error: Unknown store type '{args.store}'")
+        sys.exit(1)
+
     # Initialize processor
-    processor = ReceiptProcessor(args.credentials, args.token)
-    
+    processor = ReceiptProcessor(store_parser, args.store, args.credentials, args.token)
+
     # Process the receipt
     processor.process_receipt(
         args.pdf_path,

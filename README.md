@@ -5,10 +5,11 @@ A Python script that extracts itemized data from receipt PDFs and uploads it to 
 ## Features
 
 - **PDF Table Extraction**: Automatically extracts receipt tables from PDF files
+- **Multiple Store Support**: Supports ICA and Willy's receipt formats with extensible architecture
 - **Google Sheets Integration**: Upload extracted data directly to Google Sheets
 - **CSV Export**: Save data to CSV files for local processing
 - **Flexible Output**: Create new spreadsheets or update existing sheets
-- **Receipt Format Support**: Handles Swedish ICA receipt format and similar structured receipts
+- **Smart Parsing**: Handles discounts, weighted items, multi-line entries, and deposit fees
 
 ## Installation
 
@@ -48,25 +49,41 @@ pip install pdfplumber google-api-python-client google-auth-httplib2 google-auth
 
 ### Basic Usage - Save to CSV
 
+First, Download receipts from kivra.com
 ```bash
-uv run python receipt_processor.py "path/to/receipt.pdf" --to-csv output.csv
+mv ~/Downloads/ICA\ * bills
+uv run python receipt_processor.py "path/to/receipt.pdf" --store ICA --to-csv output.csv
+```
+
+If 'Token has been expired or revoked.'
+```bash
+rm token.json
 ```
 
 ### Upload to Existing Google Sheet
 
 ```bash
-uv run python receipt_processor.py "path/to/receipt.pdf" --spreadsheet-id "your-sheet-id"
+mv ~/Downloads/ICA\ * bills
+rm token.json
+uv run python receipt_processor.py "path/to/receipt.pdf" --spreadsheet-id "your-sheet-id" --store WILLYS
+uv run python receipt_processor.py "bills/ICA Supermarket Brommaplan 2026-05-04.pdf" --spreadsheet-id "your-sheet-id" --store=ICA
+```
+
+### Bulk run of each file in bills with form <YYYY-MM-dd> with dd > DD
+```
+./bulk-run.sh --year YYYY --month MM --after-day DD --spreadsheet-id ID --store STORE_NAME
 ```
 
 ### Create New Google Spreadsheet
 
 ```bash
-uv run python receipt_processor.py "path/to/receipt.pdf" --create-new
+uv run python receipt_processor.py "path/to/receipt.pdf" --store ICA --create-new
 ```
 
 ### Command Line Options
 
 - `pdf_path`: Path to the receipt PDF file (required)
+- `--store`: Store type - ICA or WILLYS (required)
 - `--spreadsheet-id`: Google Sheets spreadsheet ID (required unless using --create-new or --to-csv)
 - `--sheet-name`: Name of the sheet to update (default: "Receipt Items")
 - `--create-new`: Create a new spreadsheet instead of updating existing one
@@ -79,32 +96,49 @@ uv run python receipt_processor.py "path/to/receipt.pdf" --create-new
 ### Process ICA Receipt and Save to CSV
 
 ```bash
-uv run python receipt_processor.py "bills/ICA_receipt.pdf" --to-csv "grocery_items.csv"
+uv run python receipt_processor.py "bills/ICA_receipt.pdf" --store ICA --to-csv "grocery_items.csv"
 ```
 
-### Upload to Specific Google Sheet
+### Process Willy's Receipt and Upload to Google Sheets
 
 ```bash
-uv run python receipt_processor.py "bills/receipt.pdf" --spreadsheet-id "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+uv run python receipt_processor.py "bills/willys_receipt.pdf" --store WILLYS --spreadsheet-id "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
 ```
 
 ### Create New Spreadsheet for Each Receipt
 
 ```bash
-uv run python receipt_processor.py "bills/receipt_2025-09-17.pdf" --create-new
+uv run python receipt_processor.py "bills/receipt_2025-09-17.pdf" --store ICA --create-new
 ```
 
 ## Supported Receipt Formats
 
-The script is designed to work with structured PDF receipts that contain:
+The script supports the following store formats:
 
-- Item names/descriptions
-- Prices in decimal format (xx.xx or xx,xx)
-- Tabular layout or structured text format
+### ICA Supermarket (Sweden)
+- Tabular format with columns: Beskrivning, Artikelnummer, Pris, Mängd, Summa
+- Total labeled as "Betalat"
+- Date in "Datum" field (YYYY-MM-DD format)
+- Supports discounts and reductions
 
-Tested formats:
--  ICA Supermarket receipts (Swedish)
--  General European receipt formats with similar structure
+### Willy's (Sweden)
+- Plain text list format
+- Items between "Start Självscanning" and "Slut Självscanning" markers
+- Total labeled as "Totalt [amount] SEK"
+- Date in YYYY-MM-DD format
+- Special handling for:
+  - Weighted items (e.g., cheese, produce with kg*kr/kg calculations)
+  - Multi-quantity items (e.g., 4st*11,90)
+  - Discounts (Rabatt: prefix)
+  - Price reductions (Prisnedsättning percentage)
+  - Deposit fees (+PANT prefix)
+
+### Adding New Stores
+
+The architecture is designed to be extensible. To add a new store:
+1. Create a new class inheriting from `StoreParser`
+2. Implement `parse_items()`, `extract_total()`, and `extract_date()` methods
+3. Add the store choice to the `--store` argument in `main()`
 
 ## Output Format
 
@@ -150,7 +184,7 @@ bills2sheet_pdf/
 **Google Sheets Authentication Errors**
 - Verify `credentials.json` is in the project directory
 - Check that Google Sheets API is enabled in your Google Cloud project
-- Delete `token.json`, run the app again -  a brwoser window asking you to authenticate again should open
+- Delete `token.json`, run the app again -  a browser window asking you to authenticate again should open
 
 **Import/Module Errors**
 - Ensure all dependencies are installed: `uv sync`

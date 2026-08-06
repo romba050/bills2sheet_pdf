@@ -1,6 +1,7 @@
 # Google API credentials - DO NOT COMMIT
 credentials.json
 token.json
+service_account.json
 
 # Python-generated files
 __pycache__/

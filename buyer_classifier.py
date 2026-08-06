@@ -21,16 +21,32 @@ import csv
 import json
 import re
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 
 try:
     from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
     from google.oauth2 import service_account
     from rapidfuzz import fuzz, process as fuzz_process
 except ImportError:
     print("Error: dependencies not installed. Run: uv sync")
     sys.exit(1)
+
+
+def execute_with_retry(request, attempts=5):
+    """Execute a Sheets API request, backing off on rate limits (60 reads/min)."""
+    for attempt in range(attempts):
+        try:
+            return request.execute()
+        except HttpError as e:
+            if e.resp.status in (429, 500, 503) and attempt < attempts - 1:
+                wait = 20 * (attempt + 1)
+                print(f"Rate limited by Sheets API, retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -42,6 +58,16 @@ BUYER_COL = {'shared': 1, 'me': 2, 'jessica': 3}
 COL_BUYER = {v: k for k, v in BUYER_COL.items()}
 
 ITEM_HEADER = ['Item', 'Shared expenses', 'My expenses', 'Jessica expenses']
+
+
+def is_item_header(cells: list) -> bool:
+    """Tolerant header detection: older sheets name the columns slightly
+    differently, but always as item / shared / my-ish / Jessica."""
+    a, b, c, d = (str(cell).strip().lower() for cell in cells[:4])
+    return (a.startswith('item')
+            and 'shared' in b
+            and ('my' in c or 'mine' in c or 'basile' in c)
+            and 'jessica' in d)
 
 RULE_FIELDS = ['item_normalized', 'assigned_buyer', 'source',
                'shared_count', 'me_count', 'jessica_count',
@@ -154,26 +180,34 @@ def save_rules(config: dict, rules: dict, order: list) -> None:
 # --- Sheet reading ----------------------------------------------------------
 
 def list_item_tabs(service, spreadsheet_id: str, skip_tabs: list) -> list:
-    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    meta = execute_with_retry(service.spreadsheets().get(spreadsheetId=spreadsheet_id))
     return [s['properties']['title'] for s in meta['sheets']
             if s['properties']['title'] not in skip_tabs]
 
 
-def read_item_rows(service, spreadsheet_id: str, tab: str) -> list:
-    """Read one receipt tab and return item rows as
-    (row_number, item_name, amount, buyer_or_None, n_filled_columns).
+def fetch_tabs(service, spreadsheet_id: str, tabs: list) -> dict:
+    """Fetch the A:D range of many tabs in a single batchGet request."""
+    if not tabs:
+        return {}
+    result = execute_with_retry(service.spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id, ranges=[f"'{t}'!A1:D400" for t in tabs]))
+    return {tab: vr.get('values', [])
+            for tab, vr in zip(tabs, result.get('valueRanges', []))}
+
+
+def parse_item_rows(values: list) -> tuple[list, bool]:
+    """Parse one receipt tab's A:D values into (item rows, header_found).
+    Rows are (row_number, item_name, amount, buyer_or_None, n_filled_columns).
 
     buyer is None when no expense column is filled; n_filled_columns > 1
     signals an invalid row (amount in several columns).
     """
-    values = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=f"'{tab}'!A1:D400").execute().get('values', [])
     rows = []
     header_seen = False
     for i, row in enumerate(values, start=1):
         row = row + [''] * (4 - len(row))
         if not header_seen:
-            if [str(c).strip() for c in row[:4]] == ITEM_HEADER:
+            if is_item_header(row):
                 header_seen = True
             continue
         name = str(row[0]).strip()
@@ -194,7 +228,7 @@ def read_item_rows(service, spreadsheet_id: str, tab: str) -> list:
             rows.append((i, name, None, None, len(filled)))
         else:
             rows.append((i, name, None, None, 0))
-    return rows
+    return rows, header_seen
 
 
 def tab_date(tab: str, spreadsheet_label: str) -> date | None:
@@ -237,8 +271,12 @@ def cmd_learn(config: dict, args) -> None:
         except Exception as e:
             warnings.append(f"Cannot read '{label}' ({sid}): {e}")
             continue
+        tab_values = fetch_tabs(service, sid, tabs)
         for tab in tabs:
-            rows = read_item_rows(service, sid, tab)
+            rows, header_found = parse_item_rows(tab_values[tab])
+            if not header_found:
+                warnings.append(f"Skipped '{label}' / '{tab}': no item table header found.")
+                continue
             item_rows = [r for r in rows if r[3] is not None]
             if not item_rows:
                 continue
@@ -340,8 +378,12 @@ def cmd_classify(config: dict, args) -> None:
              'skipped_filled': 0, 'moved': 0}
     flagged, eval_rows = [], []
 
+    tab_values = fetch_tabs(service, spreadsheet_id, tabs)
     for tab in tabs:
-        rows = read_item_rows(service, spreadsheet_id, tab)
+        rows, header_found = parse_item_rows(tab_values[tab])
+        if not header_found:
+            print(f"Skipped '{tab}': no item table header found.")
+            continue
         updates = []
         for row_num, name, amount, buyer, n_filled in rows:
             if n_filled != 1:
@@ -375,9 +417,9 @@ def cmd_classify(config: dict, args) -> None:
                     updates.append({'range': f"'{tab}'!{col_letter}{row_num}",
                                     'values': [[amount]]})
         if updates:
-            service.spreadsheets().values().batchUpdate(
+            execute_with_retry(service.spreadsheets().values().batchUpdate(
                 spreadsheetId=spreadsheet_id,
-                body={'valueInputOption': 'USER_ENTERED', 'data': updates}).execute()
+                body={'valueInputOption': 'USER_ENTERED', 'data': updates}))
 
     if args.evaluate:
         total = len(eval_rows)

@@ -32,15 +32,13 @@ from abc import ABC, abstractmethod
 
 try:
     from googleapiclient.discovery import build
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.oauth2 import service_account
 except ImportError:
     print("Error: Google API client libraries not installed.")
     print("""Install with:
-          uv add google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          uv add google-api-python-client google-auth-httplib2
           or
-          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib""")
+          pip install google-api-python-client google-auth-httplib2""")
     sys.exit(1)
 
 
@@ -522,39 +520,25 @@ class WillysParser(StoreParser):
 
 
 class ReceiptProcessor:
-    def __init__(self, store_parser: StoreParser, store_name: str, credentials_file: str = 'credentials.json', token_file: str = 'token.json'):
+    def __init__(self, store_parser: StoreParser, store_name: str, credentials_file: str = 'service_account.json'):
         """Initialize the receipt processor with Google Sheets API credentials."""
         self.store_parser = store_parser
         self.store_name = store_name
         self.credentials_file = credentials_file
-        self.token_file = token_file
         self.service = None
-        
+
     def authenticate_google_sheets(self) -> None:
-        """Authenticate with Google Sheets API."""
-        creds = None
-        
-        # Load existing token if available
-        if Path(self.token_file).exists():
-            creds = Credentials.from_authorized_user_file(self.token_file, SCOPES)
-        
-        # If no valid credentials, get new ones
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                if not Path(self.credentials_file).exists():
-                    print(f"Error: {self.credentials_file} not found.")
-                    print("Download it from Google Cloud Console and place it in the script directory.")
-                    sys.exit(1)
-                
-                flow = InstalledAppFlow.from_client_secrets_file(self.credentials_file, SCOPES)
-                creds = flow.run_local_server(port=0)
-            
-            # Save credentials for next run
-            with open(self.token_file, 'w') as token:
-                token.write(creds.to_json())
-        
+        """Authenticate with Google Sheets API using a service account.
+
+        The target spreadsheet must be shared with the service account's
+        client_email (Editor role).
+        """
+        if not Path(self.credentials_file).exists():
+            print(f"Error: {self.credentials_file} not found.")
+            print("Create a service account key in Google Cloud Console and place it in the script directory.")
+            sys.exit(1)
+
+        creds = service_account.Credentials.from_service_account_file(self.credentials_file, scopes=SCOPES)
         self.service = build('sheets', 'v4', credentials=creds)
     
     def create_or_update_sheet(self, spreadsheet_id: str, sheet_name: str, data: List[Tuple[str, str]], pdf_path: str) -> None:
@@ -687,6 +671,8 @@ class ReceiptProcessor:
             print(f"Successfully created new spreadsheet: {title} with expense tracking columns and summary calculations")
             print(f"Spreadsheet ID: {spreadsheet_id}")
             print(f"URL: https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit")
+            print("Note: this spreadsheet is owned by the service account and won't appear in your "
+                  "personal Drive; prefer --spreadsheet-id with a sheet shared with the service account.")
             
             return spreadsheet_id
             
@@ -760,8 +746,7 @@ def main():
     parser.add_argument('--spreadsheet-id', help='Google Sheets spreadsheet ID (required unless --create-new)')
     parser.add_argument('--sheet-name', default='Receipt Items', help='Name of the sheet to update (default: Receipt Items)')
     parser.add_argument('--create-new', action='store_true', help='Create a new spreadsheet instead of updating existing one')
-    parser.add_argument('--credentials', default='credentials.json', help='Path to Google API credentials file')
-    parser.add_argument('--token', default='token.json', help='Path to token file for storing authentication')
+    parser.add_argument('--credentials', default='service_account.json', help='Path to Google service account key file')
     parser.add_argument('--to-csv', help='Save extracted data to CSV file instead of Google Sheets')
 
     args = parser.parse_args()
@@ -780,7 +765,7 @@ def main():
         sys.exit(1)
 
     # Initialize processor
-    processor = ReceiptProcessor(store_parser, args.store, args.credentials, args.token)
+    processor = ReceiptProcessor(store_parser, args.store, args.credentials)
 
     # Process the receipt
     processor.process_receipt(

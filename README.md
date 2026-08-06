@@ -35,15 +35,16 @@ pip install pdfplumber google-api-python-client google-auth-httplib2 google-auth
    - Navigate to "APIs & Services" > "Library"
    - Search for "Google Sheets API" and enable it
 
-3. **Create Credentials**:
-   - Go to "APIs & Services" > "Credentials"
-   - Click "Create Credentials" > "OAuth 2.0 Client IDs"
-   - Choose "Desktop application"
-   - Download the credentials JSON file
+3. **Create a Service Account**:
+   - Go to "IAM & Admin" > "Service Accounts"
+   - Click "Create Service Account" (e.g. `bills2sheet-sync`), no project roles needed
+   - Open the account > "Keys" > "Add key" > "Create new key" > JSON
+   - Save the downloaded file as `service_account.json` in the project directory
 
-4. **Setup Credentials**:
-   - Save the downloaded file as `credentials.json` in the project directory
-   - On first run, you'll be prompted to authorize the application
+4. **Share your spreadsheet with the service account**:
+   - Open the target Google Sheet, click "Share"
+   - Add the service account's email (e.g. `bills2sheet-sync@<project>.iam.gserviceaccount.com`) as **Editor**
+   - No browser authorization or token refresh is needed
 
 ## Usage
 
@@ -55,16 +56,12 @@ mv ~/Downloads/ICA\ * bills
 uv run python receipt_processor.py "path/to/receipt.pdf" --store ICA --to-csv output.csv
 ```
 
-If 'Token has been expired or revoked.'
-```bash
-rm token.json
-```
-
 ### Upload to Existing Google Sheet
+
+The sheet must be shared with the service account (see Setup above).
 
 ```bash
 mv ~/Downloads/ICA\ * bills
-rm token.json
 uv run python receipt_processor.py "path/to/receipt.pdf" --spreadsheet-id "your-sheet-id" --store WILLYS
 uv run python receipt_processor.py "bills/ICA Supermarket Brommaplan 2026-05-04.pdf" --spreadsheet-id "your-sheet-id" --store=ICA
 ```
@@ -87,8 +84,7 @@ uv run python receipt_processor.py "path/to/receipt.pdf" --store ICA --create-ne
 - `--spreadsheet-id`: Google Sheets spreadsheet ID (required unless using --create-new or --to-csv)
 - `--sheet-name`: Name of the sheet to update (default: "Receipt Items")
 - `--create-new`: Create a new spreadsheet instead of updating existing one
-- `--credentials`: Path to Google API credentials file (default: credentials.json)
-- `--token`: Path to token file for storing authentication (default: token.json)
+- `--credentials`: Path to Google service account key file (default: service_account.json)
 - `--to-csv`: Save extracted data to CSV file instead of Google Sheets
 
 ## Examples
@@ -159,8 +155,7 @@ Havregurt ugnsbaka,34.95
 ```
 bills2sheet_pdf/
  receipt_processor.py    # Main script
- credentials.json        # Google API credentials (you provide)
- token.json             # OAuth token (auto-generated)
+ service_account.json    # Google service account key (you provide)
  bills/                 # Example PDF receipts
  README.md             # This file
  pyproject.toml        # Project dependencies
@@ -182,9 +177,9 @@ bills2sheet_pdf/
 - Try with a different PDF or check if the receipt format is supported
 
 **Google Sheets Authentication Errors**
-- Verify `credentials.json` is in the project directory
+- Verify `service_account.json` is in the project directory
 - Check that Google Sheets API is enabled in your Google Cloud project
-- Delete `token.json`, run the app again -  a browser window asking you to authenticate again should open
+- On a 403/"The caller does not have permission" error, make sure the spreadsheet is shared with the service account's email as Editor
 
 **Import/Module Errors**
 - Ensure all dependencies are installed: `uv sync`

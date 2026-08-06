@@ -107,6 +107,47 @@ uv run python receipt_processor.py "bills/willys_receipt.pdf" --store WILLYS --s
 uv run python receipt_processor.py "bills/receipt_2025-09-17.pdf" --store ICA --create-new
 ```
 
+## Buyer Classifier
+
+`buyer_classifier.py` pre-fills the buyer columns (Shared/My/Jessica expenses) of a
+month's receipt sheets, learned from previous, manually corrected months. It is a
+transparent frequency-count rule table — no ML — stored in `rules/buyer_rules.csv`
+(version-controlled; edit it directly in your editor).
+
+The monthly loop:
+
+```bash
+# 1. After importing the month's receipts, pre-fill buyer columns (dry-run first):
+uv run python buyer_classifier.py classify
+uv run python buyer_classifier.py classify --apply
+
+# 2. Correct any mistakes directly in Google Sheets (move amounts between columns).
+
+# 3. Next month, fold your corrections back into the rules:
+uv run python buyer_classifier.py learn
+
+# Inspect the rules at any time:
+uv run python buyer_classifier.py rules
+```
+
+How it works:
+
+- `learn` scans the historical spreadsheets listed in `classifier_config.json`
+  (they must be shared with the service account), notes which column each item's
+  amount is in, and rebuilds the rule table. Recent months weigh more
+  (exponential decay, configurable half-life). Tabs where every amount is still
+  in the Shared column are skipped as uncorrected raw imports.
+- `classify` moves each amount from the raw Shared column into the predicted
+  column. Rows you already moved to My/Jessica are never touched. Unknown items
+  are matched fuzzily (rapidfuzz) or left in Shared and flagged in the report.
+  Without `--apply` it only prints what it would do.
+- `classify --evaluate` scores predictions against an already-corrected
+  spreadsheet (`--spreadsheet-id`) instead of writing.
+- Editing `assigned_buyer` in the CSV makes the rule stick: the tool detects the
+  edit, marks the row `source=manual`, and `learn` never overwrites it. Shared
+  wins whenever its share is at least 1/3; ties fall back to shared. All
+  thresholds live in `classifier_config.json`.
+
 ## Supported Receipt Formats
 
 The script supports the following store formats:

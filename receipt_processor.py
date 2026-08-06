@@ -150,6 +150,7 @@ class ICAParser(StoreParser):
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 all_tables = []
+                page_texts = []
 
                 for page in pdf.pages:
                     # Try to extract tables
@@ -157,14 +158,17 @@ class ICAParser(StoreParser):
                     if tables:
                         all_tables.extend(tables)
 
-                    # If no tables found, try to extract text and parse it
-                    if not tables:
-                        text = page.extract_text()
-                        if text:
-                            # Parse text for receipt structure
-                            parsed_table = self._parse_receipt_text(text)
-                            if parsed_table:
-                                all_tables.append(parsed_table)
+                    text = page.extract_text()
+                    if text:
+                        page_texts.append(text)
+
+                # Parse the text of all pages as one document: the item list of a
+                # multi-page receipt continues on page 2+, where the column header
+                # is not repeated, so pages cannot be parsed in isolation
+                if page_texts:
+                    parsed_table = self._parse_receipt_text('\n'.join(page_texts))
+                    if parsed_table:
+                        all_tables.append(parsed_table)
 
                 if not all_tables:
                     raise ValueError(f"No tables found in PDF: {pdf_path}")
@@ -195,8 +199,9 @@ class ICAParser(StoreParser):
 
             # After header, look for item lines with pattern: name, article_number, price, quantity, total
             if header_found:
-                # Stop at footer indicators
-                if any(keyword in line.lower() for keyword in ['betalat', 'moms', 'kort', 'totalt', 'köp']):
+                # Stop at footer indicators (must start the line, so item lines
+                # merely containing a keyword, e.g. "Pantretur, låg moms", survive)
+                if line.lower().startswith(('betalat', 'moms', 'kort', 'totalt', 'köp')):
                     break
 
                 # Try to parse item lines - they typically have name + number + prices
@@ -211,10 +216,11 @@ class ICAParser(StoreParser):
                             break
 
                     if negative_price:
-                        # This is a reduction line - extract everything before the price as item name
+                        # This is a reduction line - the name ends at the first purely
+                        # numeric token (amount or quantity)
                         item_parts = []
                         for part in parts:
-                            if part == parts[-1] and re.match(r'^-\d+[,\.]\d{2}$', part):
+                            if re.match(r'^-?\d+([,\.]\d+)?$', part):
                                 break
                             item_parts.append(part)
 
@@ -245,6 +251,16 @@ class ICAParser(StoreParser):
                         if item_name and len(prices) >= 2:
                             # Format: [item_name, article_num, unit_price, quantity, total_price]
                             table_rows.append([item_name, article_num, prices[0], '1.00 st', prices[-1]])
+                            continue
+
+                    # Lines without an article number, e.g. deposits: "Pant 2,00 1 2,00"
+                    # Pattern: name + unit_price + quantity + total_price
+                    m = re.match(r'^(.+?)\s+(\d+[,\.]\d{2})\s+(\d+(?:[,\.]\d+)?)\s+(\d+[,\.]\d{2})$', line)
+                    if m:
+                        item_name = m.group(1)
+                        unit_price = m.group(2).replace(',', '.')
+                        total_price = m.group(4).replace(',', '.')
+                        table_rows.append([item_name, '', unit_price, f'{m.group(3)} st', total_price])
 
         return table_rows if len(table_rows) > 1 else []
 

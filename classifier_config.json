@@ -15,11 +15,11 @@
         "July 2025": "1iCDF6fDIuLkDvYoBch_9vXOEFV7BXPqf1ZwqHz7l4Ic",
         "April 2025": "13b-XFOGyqdx-0BIaXCxvTdIE5JZ1AkRvThxoPrfK8tQ"
     },
-    "shared_threshold": 0.3333,
+    "shared_threshold": 0.45,
     "fuzzy_threshold": 90,
     "recency_weighting": true,
     "recency_half_life_months": 3.0,
-    "default_buyer": "shared",
+    "default_buyer": "me",
     "skip_tabs": ["Totals"],
     "skip_all_shared_tabs_when_learning": true
 }

@@ -137,11 +137,19 @@ def load_rules(config: dict) -> tuple[dict, list]:
     Returns (rules dict keyed by item_normalized, ordered key list).
     Detects manual edits: an 'auto' row whose assigned_buyer disagrees with
     its own counts was edited by the user and is flipped to 'manual'.
+    Detection uses the shared_threshold recorded when the table was written
+    (rules/.learn_meta.json), so changing the threshold in the config is not
+    mistaken for a user edit.
     """
     rules_path = Path(config['rules_csv'])
     rules, order = {}, []
     if not rules_path.exists():
         return rules, order
+    meta_path = rules_path.parent / '.learn_meta.json'
+    detection_threshold = config['shared_threshold']
+    if meta_path.exists():
+        with open(meta_path) as f:
+            detection_threshold = json.load(f).get('shared_threshold', detection_threshold)
     with open(rules_path, newline='') as f:
         for row in csv.DictReader(f):
             key = row['item_normalized']
@@ -150,7 +158,7 @@ def load_rules(config: dict) -> tuple[dict, list]:
             row['jessica_count'] = float(row['jessica_count'] or 0)
             if row['source'] == 'auto':
                 expected = assign_buyer(row['shared_count'], row['me_count'],
-                                        row['jessica_count'], config['shared_threshold'])
+                                        row['jessica_count'], detection_threshold)
                 if row['assigned_buyer'] != expected:
                     print(f"Detected manual edit of '{key}' "
                           f"({expected} -> {row['assigned_buyer']}), marking as manual.")
@@ -164,6 +172,8 @@ def save_rules(config: dict, rules: dict, order: list) -> None:
     """Write the rule CSV, preserving existing row order; new keys go last, sorted."""
     rules_path = Path(config['rules_csv'])
     rules_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(rules_path.parent / '.learn_meta.json', 'w') as f:
+        json.dump({'shared_threshold': config['shared_threshold']}, f)
     new_keys = sorted(k for k in rules if k not in set(order))
     with open(rules_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=RULE_FIELDS)

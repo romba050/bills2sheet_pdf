@@ -401,10 +401,10 @@ pan chili cheese,me,auto,0,1.12,0,1.00,2026-06-21
 pan pizza veggie,me,auto,0,0.42,0,1.00,2026-01-24
 paneer,me,auto,0,0.51,0,1.00,2026-05-10
 pannbiff i peppsàs,me,auto,0,0.08,0,1.00,2025-09-15
-pant,me,auto,2.74,3.18,2.74,0.37,2026-06-19
-pant aluminiumburk,shared,auto,0.38,0,0,1.00,2025-12-30
-pant eng pet,shared,auto,0.19,0,0,1.00,2025-12-30
-pantretur,shared,auto,0.61,0,0,1.00,2026-06-03
+pant,shared,manual,2.74,3.18,2.74,0.37,2026-06-19
+pant aluminiumburk,shared,manual,0.38,0,0,1.00,2025-12-30
+pant eng pet,shared,manual,0.19,0,0,1.00,2025-12-30
+pantretur,shared,manual,0.61,0,0,1.00,2026-06-03
 "pantretur, hög moms",shared,auto,0.34,0,0,1.00,2026-03-18
 "pantretur, låg moms",shared,auto,0.26,0,0,1.00,2026-02-08
 papperskasse,shared,auto,0.09,0.03,0,0.77,2025-09-19
@@ -428,6 +428,8 @@ pepparrot riven,jessica,auto,0,0,0.35,1.00,2026-03-21
 pepper jack ost sk,me,auto,0,0.09,0,1.00,2025-09-23
 pepsi max,me,auto,0.75,2.99,2.69,0.47,2026-06-25
 pepsi max burk,shared,auto,0.19,0,0,1.00,2025-12-30
+pepsi max 10p,jessica,auto,0,0,0,1.00,
+persika,me,auto,0,0.7,0,1.00,2026-06-21
 persika,me,auto,0,0.7,0,1.00,2026-06-21
 persika korg,me,auto,0,0.05,0,1.00,2025-07-15
 persilja,me,auto,0,1.41,0,1.00,2026-06-09

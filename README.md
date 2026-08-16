@@ -116,15 +116,13 @@ transparent frequency-count rule table — no ML — stored in `rules/buyer_rule
 
 ### Which spreadsheet and tabs does `classify` work on?
 
-`classify` does not detect the current month by date. It targets exactly one
-spreadsheet: the `current_spreadsheet_id` in `classifier_config.json`. Within
-that spreadsheet it processes every tab except those listed in `skip_tabs`
-(e.g. `Totals`); tabs without the `Item | Shared | My | Jessica` header row are
-skipped automatically. Two flags narrow or redirect a single run:
-
-- `--spreadsheet-id <ID>` — classify a different spreadsheet just this once
-  (the ID is the long string in the sheet's URL)
-- `--sheet <TAB>` — classify only that one tab
+`classify` does not detect the current month by date. The target spreadsheet
+must always be given explicitly with `--spreadsheet-id <ID>` (the long string
+in the sheet's URL) — there is no configured default, so a run can never hit
+the wrong month by accident. Within that spreadsheet it processes every tab
+except those listed in `skip_tabs` (e.g. `Totals`); tabs without the
+`Item | Shared | My | Jessica` header row are skipped automatically.
+`--sheet <TAB>` limits the run to a single tab.
 
 Nothing is written without `--apply`; the default is a dry-run report. Rows
 whose amount is already in the My/Jessica columns are never touched either way.
@@ -132,13 +130,12 @@ whose amount is already in the My/Jessica columns are never touched either way.
 The monthly loop:
 
 ```bash
-# 0. New month: create the month's spreadsheet, share it with the service
-#    account (Editor), and set "current_spreadsheet_id" in
-#    classifier_config.json to its ID.
+# 0. New month: create the month's spreadsheet and share it with the service
+#    account (Editor).
 
 # 1. After importing the month's receipts, pre-fill buyer columns (dry-run first):
-uv run python buyer_classifier.py classify
-uv run python buyer_classifier.py classify --apply
+uv run python buyer_classifier.py classify --spreadsheet-id <ID>
+uv run python buyer_classifier.py classify --spreadsheet-id <ID> --apply
 
 # 2. Correct any mistakes directly in Google Sheets (move amounts between columns).
 
@@ -162,7 +159,7 @@ How it works:
   are matched fuzzily (rapidfuzz) or left in Shared and flagged in the report.
   Without `--apply` it only prints what it would do.
 - `classify --evaluate` scores predictions against an already-corrected
-  spreadsheet (`--spreadsheet-id`) instead of writing.
+  spreadsheet instead of writing.
 - Editing `assigned_buyer` in the CSV makes the rule stick: the tool detects the
   edit, marks the row `source=manual`, and `learn` never overwrites it. To
   release a rule back to the data, set its `source` to `auto` and run `learn`.

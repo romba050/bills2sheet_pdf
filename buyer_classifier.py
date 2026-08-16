@@ -9,8 +9,8 @@ CSV that can be edited by hand; manually edited rules are never overwritten.
 
 Commands:
     uv run python buyer_classifier.py learn
-    uv run python buyer_classifier.py classify [--sheet TAB] [--apply]
-    uv run python buyer_classifier.py classify --evaluate [--spreadsheet-id ID]
+    uv run python buyer_classifier.py classify --spreadsheet-id ID [--sheet TAB] [--apply]
+    uv run python buyer_classifier.py classify --spreadsheet-id ID --evaluate
     uv run python buyer_classifier.py rules
 
 All thresholds and spreadsheet IDs are in classifier_config.json.
@@ -380,7 +380,7 @@ def cmd_classify(config: dict, args) -> None:
               "Run 'learn' first.")
         sys.exit(1)
 
-    spreadsheet_id = args.spreadsheet_id or config['current_spreadsheet_id']
+    spreadsheet_id = args.spreadsheet_id
     tabs = [args.sheet] if args.sheet else list_item_tabs(service, spreadsheet_id,
                                                           config['skip_tabs'])
     dry_run = not args.apply
@@ -486,7 +486,8 @@ def main():
                          help='Skip a config history entry (label or ID, repeatable)')
 
     p_cls = sub.add_parser('classify', help='Pre-fill buyer columns of the current month')
-    p_cls.add_argument('--spreadsheet-id', help='Target spreadsheet (default: config)')
+    p_cls.add_argument('--spreadsheet-id', required=True,
+                       help='Target spreadsheet ID (the long string in the sheet URL)')
     p_cls.add_argument('--sheet', help='Only this tab (default: all item tabs)')
     p_cls.add_argument('--apply', action='store_true',
                        help='Write to the sheet (default is dry-run)')

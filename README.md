@@ -114,16 +114,36 @@ month's receipt sheets, learned from previous, manually corrected months. It is 
 transparent frequency-count rule table — no ML — stored in `rules/buyer_rules.csv`
 (version-controlled; edit it directly in your editor).
 
+### Which spreadsheet and tabs does `classify` work on?
+
+`classify` does not detect the current month by date. It targets exactly one
+spreadsheet: the `current_spreadsheet_id` in `classifier_config.json`. Within
+that spreadsheet it processes every tab except those listed in `skip_tabs`
+(e.g. `Totals`); tabs without the `Item | Shared | My | Jessica` header row are
+skipped automatically. Two flags narrow or redirect a single run:
+
+- `--spreadsheet-id <ID>` — classify a different spreadsheet just this once
+  (the ID is the long string in the sheet's URL)
+- `--sheet <TAB>` — classify only that one tab
+
+Nothing is written without `--apply`; the default is a dry-run report. Rows
+whose amount is already in the My/Jessica columns are never touched either way.
+
 The monthly loop:
 
 ```bash
+# 0. New month: create the month's spreadsheet, share it with the service
+#    account (Editor), and set "current_spreadsheet_id" in
+#    classifier_config.json to its ID.
+
 # 1. After importing the month's receipts, pre-fill buyer columns (dry-run first):
 uv run python buyer_classifier.py classify
 uv run python buyer_classifier.py classify --apply
 
 # 2. Correct any mistakes directly in Google Sheets (move amounts between columns).
 
-# 3. Next month, fold your corrections back into the rules:
+# 3. Next month, add the finished month to "history_spreadsheets" in
+#    classifier_config.json and fold your corrections back into the rules:
 uv run python buyer_classifier.py learn
 
 # Inspect the rules at any time:
@@ -144,8 +164,10 @@ How it works:
 - `classify --evaluate` scores predictions against an already-corrected
   spreadsheet (`--spreadsheet-id`) instead of writing.
 - Editing `assigned_buyer` in the CSV makes the rule stick: the tool detects the
-  edit, marks the row `source=manual`, and `learn` never overwrites it. Shared
-  wins whenever its share is at least 1/3; ties fall back to shared. All
+  edit, marks the row `source=manual`, and `learn` never overwrites it. To
+  release a rule back to the data, set its `source` to `auto` and run `learn`.
+- Shared wins whenever its share reaches `shared_threshold`; ties between
+  me/jessica fall back to shared; unknown items get `default_buyer`. All
   thresholds live in `classifier_config.json`.
 
 ## Supported Receipt Formats

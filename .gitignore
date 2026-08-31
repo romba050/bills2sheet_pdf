@@ -1,3 +1,6 @@
+# No reason to track all bills
+bills
+
 # Google API credentials - DO NOT COMMIT
 credentials.json
 token.json

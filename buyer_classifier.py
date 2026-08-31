@@ -37,16 +37,16 @@ except ImportError:
 
 def execute_with_retry(request, attempts=5):
     """Execute a Sheets API request, backing off on rate limits (60 reads/min)."""
-    for attempt in range(attempts):
+    for attempt in range(attempts - 1):
         try:
             return request.execute()
         except HttpError as e:
-            if e.resp.status in (429, 500, 503) and attempt < attempts - 1:
-                wait = 20 * (attempt + 1)
-                print(f"Rate limited by Sheets API, retrying in {wait}s...")
-                time.sleep(wait)
-            else:
+            if e.resp.status not in (429, 500, 503):
                 raise
+            wait = 20 * (attempt + 1)
+            print(f"Rate limited by Sheets API, retrying in {wait}s...")
+            time.sleep(wait)
+    return request.execute()
 
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']

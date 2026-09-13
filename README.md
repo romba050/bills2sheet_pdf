@@ -21,6 +21,7 @@ uv sync
 ```
 
 Or install manually:
+
 ```bash
 pip install pdfplumber google-api-python-client google-auth-httplib2 google-auth-oauthlib
 ```
@@ -28,20 +29,21 @@ pip install pdfplumber google-api-python-client google-auth-httplib2 google-auth
 ## Setup for Google Sheets Integration
 
 1. **Create a Google Cloud Project**:
+
    - Go to [Google Cloud Console](https://console.cloud.google.com/)
    - Create a new project or select an existing one
-
 2. **Enable Google Sheets API**:
+
    - Navigate to "APIs & Services" > "Library"
    - Search for "Google Sheets API" and enable it
-
 3. **Create a Service Account**:
+
    - Go to "IAM & Admin" > "Service Accounts"
    - Click "Create Service Account" (e.g. `bills2sheet-sync`), no project roles needed
    - Open the account > "Keys" > "Add key" > "Create new key" > JSON
    - Save the downloaded file as `service_account.json` in the project directory
-
 4. **Share your spreadsheet with the service account**:
+
    - Open the target Google Sheet, click "Share"
    - Add the service account's email (e.g. `bills2sheet-sync@<project>.iam.gserviceaccount.com`) as **Editor**
    - No browser authorization or token refresh is needed
@@ -51,6 +53,7 @@ pip install pdfplumber google-api-python-client google-auth-httplib2 google-auth
 ### Basic Usage - Save to CSV
 
 First, Download receipts from kivra.com
+
 ```bash
 mv ~/Downloads/ICA\ * bills
 uv run python receipt_processor.py "path/to/receipt.pdf" --store ICA --to-csv output.csv
@@ -66,7 +69,8 @@ uv run python receipt_processor.py "path/to/receipt.pdf" --spreadsheet-id "your-
 uv run python receipt_processor.py "bills/ICA Supermarket Brommaplan 2026-05-04.pdf" --spreadsheet-id "your-sheet-id" --store=ICA
 ```
 
-### Bulk run of each file in bills with form <YYYY-MM-dd> with dd > DD
+### Bulk run of each file in bills with form <YYYY-MM-dd></yyyy> with dd > DD
+
 ```
 ./bulk-run.sh --year YYYY --month MM --after-day DD --spreadsheet-id ID --store STORE_NAME
 ```
@@ -149,11 +153,19 @@ uv run python buyer_classifier.py rules
 
 How it works:
 
-- `learn` scans the historical spreadsheets listed in `classifier_config.json`
-  (they must be shared with the service account), notes which column each item's
-  amount is in, and rebuilds the rule table. Recent months weigh more
-  (exponential decay, configurable half-life). Tabs where every amount is still
-  in the Shared column are skipped as uncorrected raw imports.
+- `learn` scans the historical spreadsheets listed under `history_spreadsheets`
+  in `classifier_config.json` (they must be shared with the service account),
+  notes which column each item's amount is in, and rebuilds the rule table.
+  Recent months weigh more (exponential decay, configurable half-life). Tabs
+  where every amount is still in the Shared column are skipped as uncorrected
+  raw imports.
+- Which months `learn` uses: all config months by default; each run prints
+  `Learning from: ...`. Narrow it with `--only "July 2026"` (repeatable,
+  case-insensitive config labels), drop months with `--exclude <label or ID>`
+  (repeatable), or bypass the config entirely with `--spreadsheet-id <ID>`
+  (repeatable). The table's auto rules always mirror exactly the months
+  scanned in the latest run — rules for items only seen in unscanned months
+  are removed; `manual` rules always survive.
 - `classify` moves each amount from the raw Shared column into the predicted
   column. Rows you already moved to My/Jessica are never touched. Unknown items
   are matched fuzzily (rapidfuzz) or left in Shared and flagged in the report.
@@ -172,12 +184,14 @@ How it works:
 The script supports the following store formats:
 
 ### ICA Supermarket (Sweden)
+
 - Tabular format with columns: Beskrivning, Artikelnummer, Pris, Mängd, Summa
 - Total labeled as "Betalat"
 - Date in "Datum" field (YYYY-MM-DD format)
 - Supports discounts and reductions
 
 ### Willy's (Sweden)
+
 - Plain text list format
 - Items between "Start Självscanning" and "Slut Självscanning" markers
 - Total labeled as "Totalt [amount] SEK"
@@ -192,6 +206,7 @@ The script supports the following store formats:
 ### Adding New Stores
 
 The architecture is designed to be extensible. To add a new store:
+
 1. Create a new class inheriting from `StoreParser`
 2. Implement `parse_items()`, `extract_total()`, and `extract_date()` methods
 3. Add the store choice to the `--store` argument in `main()`
@@ -199,10 +214,12 @@ The architecture is designed to be extensible. To add a new store:
 ## Output Format
 
 The extracted data includes:
+
 - **Item**: Product name/description
 - **Price**: Final price in decimal format (converted from comma to dot notation)
 
 Example output:
+
 ```csv
 Item,Price
 Gr�nk�lsblad ICA,39.95
@@ -233,15 +250,18 @@ bills2sheet_pdf/
 ### Common Issues
 
 **"No tables found in PDF"**
+
 - Ensure the PDF contains structured tabular data
 - Try with a different PDF or check if the receipt format is supported
 
 **Google Sheets Authentication Errors**
+
 - Verify `service_account.json` is in the project directory
 - Check that Google Sheets API is enabled in your Google Cloud project
 - On a 403/"The caller does not have permission" error, make sure the spreadsheet is shared with the service account's email as Editor
 
 **Import/Module Errors**
+
 - Ensure all dependencies are installed: `uv sync`
 - Check that you're running with `uv run python` if using uv
 

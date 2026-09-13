@@ -263,9 +263,21 @@ def cmd_learn(config: dict, args) -> None:
     history = dict(config['history_spreadsheets'])
     if args.spreadsheet_id:
         history = {f'cli-{i}': sid for i, sid in enumerate(args.spreadsheet_id)}
-    if args.exclude:
+    if args.only:
+        wanted = {label.lower() for label in args.only}
+        unknown = wanted - {label.lower() for label in history}
+        if unknown:
+            print(f"Error: --only labels not in the config's history_spreadsheets: "
+                  f"{', '.join(sorted(unknown))}")
+            print(f"Available: {', '.join(history)}")
+            sys.exit(1)
         history = {label: sid for label, sid in history.items()
-                   if sid not in args.exclude and label not in args.exclude}
+                   if label.lower() in wanted}
+    if args.exclude:
+        excluded = {e.lower() for e in args.exclude}
+        history = {label: sid for label, sid in history.items()
+                   if sid.lower() not in excluded and label.lower() not in excluded}
+    print(f"Learning from: {', '.join(history)}\n")
 
     half_life = config['recency_half_life_months']
     use_recency = config['recency_weighting']
@@ -321,6 +333,11 @@ def cmd_learn(config: dict, args) -> None:
         sys.exit(1)
 
     rules, order = load_rules(config)
+    # Auto rows always reflect exactly the months scanned in this run; rules
+    # for items not seen in any scanned month are dropped (manual rows stay).
+    stale = [k for k, r in rules.items() if r['source'] != 'manual' and k not in counts]
+    for key in stale:
+        del rules[key]
     updated, added, kept_manual = 0, 0, 0
     for key, c in sorted(counts.items()):
         if key in rules and rules[key]['source'] == 'manual':
@@ -349,7 +366,8 @@ def cmd_learn(config: dict, args) -> None:
     save_rules(config, rules, order)
 
     print(f"\nRule table written to {config['rules_csv']}: "
-          f"{added} added, {updated} updated, {kept_manual} manual rules untouched.")
+          f"{added} added, {updated} updated, {len(stale)} stale removed, "
+          f"{kept_manual} manual rules untouched.")
     if warnings:
         print(f"\n{len(warnings)} warning(s):")
         for w in warnings:
@@ -480,8 +498,12 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
 
     p_learn = sub.add_parser('learn', help='Rebuild the rule table from historical sheets')
-    p_learn.add_argument('--spreadsheet-id', action='append',
-                         help='Learn only from these spreadsheet IDs (repeatable)')
+    p_learn_src = p_learn.add_mutually_exclusive_group()
+    p_learn_src.add_argument('--only', action='append',
+                             help='Learn only from these config months, by label, '
+                                  'e.g. --only "July 2026" (repeatable, case-insensitive)')
+    p_learn_src.add_argument('--spreadsheet-id', action='append',
+                             help='Learn only from these raw spreadsheet IDs (repeatable)')
     p_learn.add_argument('--exclude', action='append', default=[],
                          help='Skip a config history entry (label or ID, repeatable)')
 

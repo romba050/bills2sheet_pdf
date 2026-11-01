@@ -131,21 +131,32 @@ except those listed in `skip_tabs` (e.g. `Totals`); tabs without the
 Nothing is written without `--apply`; the default is a dry-run report. Rows
 whose amount is already in the My/Jessica columns are never touched either way.
 
-The monthly loop:
+The monthly loop (for month YYYY-MM):
 
 ```bash
-# 0. New month: create the month's spreadsheet and share it with the service
-#    account (Editor).
+# 0. Create the month's spreadsheet by COPYING last month's in Google Drive
+#    (right-click > Make a copy; or ask Claude to do it). Copying keeps the
+#    Totals tab and its bound Apps Script. Rename it "Food Expenses <Month> <Year>"
+#    and share it with the service account as Editor. Note its <ID> from the URL.
 
-# 1. After importing the month's receipts, pre-fill buyer columns (dry-run first):
+# 1. Strip the copied receipt tabs, keeping only "Totals":
+uv run python prepare_month.py --spreadsheet-id <ID>
+
+# 2. Move the month's Kivra downloads into bills/ and import them:
+mv ~/Downloads/ICA\ Supermarket\ Brommaplan\ YYYY-MM-*.pdf bills/
+./bulk-run.sh --year YYYY --month MM --after-day 00 --spreadsheet-id <ID> --store ICA
+
+# 3. Refresh the rules from history (add last month to "history_spreadsheets"
+#    in classifier_config.json first, and share that sheet with the service
+#    account as Viewer if it is new):
+uv run python buyer_classifier.py learn
+
+# 4. Pre-fill buyer columns (dry-run first):
 uv run python buyer_classifier.py classify --spreadsheet-id <ID>
 uv run python buyer_classifier.py classify --spreadsheet-id <ID> --apply
 
-# 2. Correct any mistakes directly in Google Sheets (move amounts between columns).
-
-# 3. Next month, add the finished month to "history_spreadsheets" in
-#    classifier_config.json and fold your corrections back into the rules:
-uv run python buyer_classifier.py learn
+# 5. Correct any mistakes directly in Google Sheets (move amounts between columns).
+#    Those corrections feed next month's learn.
 
 # Inspect the rules at any time:
 uv run python buyer_classifier.py rules

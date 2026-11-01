@@ -1,5 +1,10 @@
-# No reason to track all bills
+# No reason to track all bills and the example sheet
 bills
+worksheet-example
+
+# Rules are private
+rules
+
 
 # Google API credentials - DO NOT COMMIT
 credentials.json
